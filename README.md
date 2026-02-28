@@ -5,21 +5,21 @@ Ghost Arm is a university research prototype that captures muscle activity via s
 
 # Goals / Projektdefinition
 
-	MUSS
-EMG signal aufnehmen (Muskelsignal)
-Filtern
-Verarbeitung - Schwellenwert
-Datenübertragung über serielle Schnittstelle
-Stromversorgung
-Ausgabe über Elektroden (Muskelstimulation)
+- MUSS
+    - EMG signal aufnehmen (Muskelsignal)
+    - Filtern
+    - Verarbeitung - Schwellenwert
+    - Datenübertragung über serielle Schnittstelle
+    - Stromversorgung
+    - Ausgabe über Elektroden (Muskelstimulation)
 
 
-	KANN
-Kalibrierung
-Pulsweitenmodulation
-Wireless Data Transfer
-Visualisierung (zB WebApp)
-Platine + Gehäuse
+- KANN
+    - Kalibrierung
+    - Pulsweitenmodulation
+    - Wireless Data Transfer
+    - Visualisierung (zB WebApp)
+    - Platine + Gehäuse
 
 # Contributors
 
