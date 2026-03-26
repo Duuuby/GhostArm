@@ -1,95 +1,134 @@
 #include <Arduino.h>
+#include <math.h>
 
-// Buttons
-#define BTN1 A1
-#define BTN2 A2
-#define BTN3 A3
+// --------------------------------------------------
+// GhostArm EMG Prototype
+// Alles in einer Datei: Input -> Filter -> Detektion -> Output
+// --------------------------------------------------
 
-// LEDs
-#define LED1 13
-#define LED2 12
-#define LED3 11
-#define LED4 10
+// ---------- Pins ----------
+constexpr uint8_t EMG_PIN    = A0;   // Analog-Eingang vom MyoWare
+constexpr uint8_t OUTPUT_PIN = 8;    // LED / Testausgang / später Treiberstufe
 
-#define LED_ON LOW
-#define LED_OFF HIGH
+// ---------- Sampling ----------
+constexpr unsigned long SAMPLE_INTERVAL_US = 1000; // 1 kHz
 
-// put function declarations here:
-void runSnakeBounceAnimation();
-void turnAllLedsOff();
+// ---------- Filterparameter ----------
+constexpr float DC_ALPHA  = 0.995f;  // langsame Basislinie
+constexpr float ENV_ALPHA = 0.08f;   // Glättung der Hüllkurve
 
+// ---------- Schwellwerte mit Hysterese ----------
+constexpr int THRESHOLD_ON  = 80;    // Einschalten ab diesem Wert
+constexpr int THRESHOLD_OFF = 60;    // Ausschalten erst unter diesem Wert
 
+// ---------- Output-Verhalten ----------
+constexpr unsigned long MIN_ON_TIME_MS = 80;   // minimale Einschaltdauer
+constexpr unsigned long REFRACTORY_MS  = 120;  // kurze Sperrzeit nach Trigger
+
+// ---------- Filter-Zustände ----------
+float baseline = 512.0f;   // Startwert in der Mitte des ADC-Bereichs
+float envelope = 0.0f;
+
+// ---------- Detektions-Zustände ----------
+bool outputActive = false;
+unsigned long lastTriggerTime = 0;
+unsigned long activeUntil = 0;
+
+// ---------- Timing ----------
+unsigned long lastSampleUs = 0;
+
+// --------------------------------------------------
+// Filterfunktion
+// raw -> AC-Anteil -> gleichrichten -> Hüllkurve
+// --------------------------------------------------
+float processEMG(int rawValue) {
+    // 1) Langsame Basislinie nachführen
+    baseline = DC_ALPHA * baseline + (1.0f - DC_ALPHA) * rawValue;
+
+    // 2) Wechselanteil berechnen
+    float ac = rawValue - baseline;
+
+    // 3) Gleichrichten
+    float rectified = fabs(ac);
+
+    // 4) Hüllkurve glätten
+    envelope = ENV_ALPHA * rectified + (1.0f - ENV_ALPHA) * envelope;
+
+    return envelope;
+}
+
+// --------------------------------------------------
+// Kontraktion erkennen
+// mit Hysterese + Mindest-Einschaltdauer + Sperrzeit
+// --------------------------------------------------
+bool detectContraction(float env, unsigned long nowMs) {
+    // Solange Mindest-Einschaltdauer noch läuft: aktiv bleiben
+    if (outputActive && nowMs < activeUntil) {
+        return true;
+    }
+
+    // Prüfen, ob wir noch in der Sperrzeit nach dem letzten Trigger sind
+    bool refractory = (nowMs - lastTriggerTime) < REFRACTORY_MS;
+
+    if (!outputActive) {
+        // Einschalten nur wenn aktuell aus, nicht in Sperrzeit und über ON-Schwelle
+        if (!refractory && env >= THRESHOLD_ON) {
+            outputActive = true;
+            lastTriggerTime = nowMs;
+            activeUntil = nowMs + MIN_ON_TIME_MS;
+        }
+    } else {
+        // Ausschalten erst wenn unter OFF-Schwelle und Mindestzeit abgelaufen
+        if (env <= THRESHOLD_OFF && nowMs >= activeUntil) {
+            outputActive = false;
+        }
+    }
+
+    return outputActive;
+}
+
+// --------------------------------------------------
+// Setup
+// --------------------------------------------------
 void setup() {
-  // put your setup code here, to run once:
-  // Buttons als Input mit Pullup
-  pinMode(BTN1, INPUT_PULLUP);
-  pinMode(BTN2, INPUT_PULLUP);
-  pinMode(BTN3, INPUT_PULLUP);
+    pinMode(EMG_PIN, INPUT);
+    pinMode(OUTPUT_PIN, OUTPUT);
+    digitalWrite(OUTPUT_PIN, LOW);
 
-  // LEDs als Output
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  pinMode(LED3, OUTPUT);
-  pinMode(LED4, OUTPUT);
+    Serial.begin(115200);
+    delay(500);
 
-  turnAllLedsOff();
+    Serial.println("GhostArm EMG Prototype Start");
+    Serial.println("raw,envelope,output");
 }
 
+// --------------------------------------------------
+// Hauptschleife
+// --------------------------------------------------
 void loop() {
+    unsigned long nowUs = micros();
 
-  if(digitalRead(BTN1) == LOW)
-  {
-    runSnakeBounceAnimation();
-  }
-  else
-  {
-    turnAllLedsOff();
-  }
+    // feste Abtastrate
+    if (nowUs - lastSampleUs >= SAMPLE_INTERVAL_US) {
+        lastSampleUs = nowUs;
 
+        // 1) Input lesen
+        int raw = analogRead(EMG_PIN);
 
-}
+        // 2) Filtern
+        float env = processEMG(raw);
 
-// put function definitions here:
-void runSnakeBounceAnimation() {
-  // +1+2
-  digitalWrite(LED1, LED_ON);
-  delay(100);
-  digitalWrite(LED2, LED_ON);
-  delay(100);
-  //+3-1 
-  digitalWrite(LED1, LED_OFF);
-  digitalWrite(LED3, LED_ON);
-  delay(100);
-  // +4-2
-  digitalWrite(LED2, LED_OFF);
-  digitalWrite(LED4, LED_ON);
-  delay(100);
-  // -3 (keep 4 on for bounce)
-  digitalWrite(LED3, LED_OFF);
-  delay(50);
+        // 3) Kontraktion erkennen
+        bool muscleActive = detectContraction(env, millis());
 
-  // flipped version (bounce back)
-  // +4+3
-  digitalWrite(LED4, LED_ON);
-  delay(100);
-  digitalWrite(LED3, LED_ON);
-  delay(100);
-  // +2-4
-  digitalWrite(LED4, LED_OFF);
-  digitalWrite(LED2, LED_ON);
-  delay(100);
-  // +1-3
-  digitalWrite(LED3, LED_OFF);
-  digitalWrite(LED1, LED_ON);
-  delay(100);
-  // -2 (keep 1 on for next cycle)
-  digitalWrite(LED2, LED_OFF);
-  delay(50);
-}
+        // 4) Output setzen
+        digitalWrite(OUTPUT_PIN, muscleActive ? HIGH : LOW);
 
-void turnAllLedsOff() {
-  digitalWrite(LED1, LED_OFF);
-  digitalWrite(LED2, LED_OFF);
-  digitalWrite(LED3, LED_OFF);
-  digitalWrite(LED4, LED_OFF);
+        // 5) Debug-Ausgabe für Serial Plotter
+        Serial.print(raw);
+        Serial.print(",");
+        Serial.print((int)env);
+        Serial.print(",");
+        Serial.println(muscleActive ? 1023 : 0);
+    }
 }
