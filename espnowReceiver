@@ -1,18 +1,30 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
+// GPIO-Pin für LED
 const int ledPin = 8;
 
+// gleiche Struktur wie Sender → MUSS identisch sein
 typedef struct struct_message {
   bool buttonPressed;
 } struct_message;
 
+// Flag → zeigt an, dass neue Daten angekommen sind
 volatile bool newDataAvailable = false;
+
+// Speicher für empfangene Daten
 struct_message myData;
 
+// Callback: wird aufgerufen, wenn Daten empfangen werden
 void OnDataRecv(const esp_now_recv_info *info, const uint8_t *incomingData, int len) {
+
+  // Sicherheitscheck: stimmt die Größe?
   if (len == sizeof(myData)) {
+
+    // Daten aus dem Buffer in unsere Struktur kopieren
     memcpy((void*)&myData, incomingData, sizeof(myData));
+
+    // Flag setzen → Verarbeitung erfolgt später in loop()
     newDataAvailable = true;
   }
 }
@@ -23,16 +35,22 @@ void setup() {
 
   Serial.println("Empfaenger startet");
 
+  // LED-Pin als Ausgang
   pinMode(ledPin, OUTPUT);
+
+  // LED initial ausschalten
   digitalWrite(ledPin, LOW);
 
+  // WLAN im Station-Modus
   WiFi.mode(WIFI_STA);
 
+  // ESP-NOW initialisieren
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Fehler");
     return;
   }
 
+  // Receive-Callback registrieren
   if (esp_now_register_recv_cb(OnDataRecv) != ESP_OK) {
     Serial.println("Fehler beim Registrieren des Receive-Callbacks");
     return;
@@ -42,16 +60,22 @@ void setup() {
 }
 
 void loop() {
+  // Wenn neue Daten vorhanden sind
   if (newDataAvailable) {
+
+    // Kritischer Bereich → verhindert Race Conditions
     noInterrupts();
     bool currentButtonState = myData.buttonPressed;
     newDataAvailable = false;
     interrupts();
 
+    // Debug-Ausgabe
     Serial.print("Knopf: ");
     Serial.println(currentButtonState ? "GEDRUECKT" : "LOS");
 
-    //  LED direkt setzen
+    // LED folgt direkt dem Knopfzustand
+    // true → HIGH → LED an
+    // false → LOW → LED aus
     digitalWrite(ledPin, currentButtonState ? HIGH : LOW);
   }
 }

@@ -1,42 +1,60 @@
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
+#include <WiFi.h>        // WLAN-Funktionalität (wird für ESP-NOW benötigt)
+#include <esp_now.h>     // ESP-NOW Protokoll
+#include <esp_wifi.h>    // Low-Level WiFi (für neue Callback-Struktur)
 
+// MAC-Adresse des Empfängers (Zielgerät)
 uint8_t broadcastAddress[] = {0x88, 0x56, 0xA6, 0x2A, 0x3F, 0x98};
 
+// GPIO-Pin für den Taster
 const int buttonPin = 2;
 
+// Datenstruktur → wird über Funk gesendet
+// Muss beim Empfänger IDENTISCH sein (Speicherlayout!)
 typedef struct struct_message {
-  bool buttonPressed;
+  bool buttonPressed;    // einziger übertragener Zustand
 } struct_message;
 
+// Instanz der Datenstruktur
 struct_message myData;
+
+// Struktur für Peer-Konfiguration (Empfänger)
 esp_now_peer_info_t peerInfo;
 
+// Callback: wird aufgerufen, nachdem ein Paket gesendet wurde
 void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   Serial.print("Sende-Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FEHLER");
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
+  Serial.begin(115200);   // Serielle Ausgabe starten
+  delay(1000);            // kurze Stabilisierung
 
   Serial.println("Sender startet");
 
+  // Taster als Eingang mit internem Pulldown
+  // → ohne Tastendruck = LOW, mit Tastendruck = HIGH
   pinMode(buttonPin, INPUT_PULLDOWN);
+
+  // WLAN in Station-Modus setzen (Voraussetzung für ESP-NOW)
   WiFi.mode(WIFI_STA);
 
+  // ESP-NOW initialisieren
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW Fehler");
     return;
   }
 
+  // Callback registrieren (Sendestatus)
   esp_now_register_send_cb(OnDataSent);
 
+  // Peer-Struktur zurücksetzen
   memset(&peerInfo, 0, sizeof(peerInfo));
+
+  // Ziel-MAC-Adresse setzen
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
 
+  // Peer (Empfänger) registrieren
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
     Serial.println("Peer Fehler");
     return;
@@ -44,31 +62,37 @@ void setup() {
 }
 
 void loop() {
-  static bool stableState = false;     // entprellter Zustand
-  static bool lastReading = false;     // letzter Rohwert
+  // --- Entprell-Variablen (statisch = behalten Wert zwischen loop()-Aufrufen)
+  static bool stableState = false;         // entprellter, stabiler Zustand
+  static bool lastReading = false;         // letzter gemessener Rohwert
   static unsigned long lastDebounceTime = 0;
 
-  const unsigned long debounceDelay = 40; // ms
+  const unsigned long debounceDelay = 40;  // Entprellzeit in ms
 
+  // Rohwert vom Taster lesen
+  // (!) invertiert mit ! → abhängig von deiner Verdrahtung
   bool reading = !digitalRead(buttonPin);
 
-  // Änderung erkannt → Timer zurücksetzen
+  // Wenn sich der Rohwert ändert → Prellen erkannt → Timer reset
   if (reading != lastReading) {
     lastDebounceTime = millis();
     lastReading = reading;
   }
 
-  // Ist der Wert lange genug stabil?
+  // Wenn der Wert lange genug stabil ist → gültiger Zustand
   if ((millis() - lastDebounceTime) > debounceDelay) {
 
-    // Nur wenn sich der stabile Zustand wirklich geändert hat
+    // Nur reagieren, wenn sich der stabile Zustand wirklich geändert hat
     if (stableState != reading) {
       stableState = reading;
 
+      // Zustand in Struktur speichern
       myData.buttonPressed = stableState;
 
+      // Daten senden
       esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
 
+      // Debug-Ausgabe
       Serial.print("Knopf stabil: ");
       Serial.println(stableState ? "GEDRUECKT" : "LOS");
     }
