@@ -129,7 +129,5 @@ double poti(int poti_pin, double reference_voltage) {
   // Serial.println(",0,3.3");
   // Serial.println(potiVal);
   // Serial.println(potiVolt);
-  delay(10);
-
   return potiVolt;
 }
