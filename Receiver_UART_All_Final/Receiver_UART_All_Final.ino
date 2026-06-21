@@ -57,12 +57,19 @@ void setup() {
 void loop() {
 
   // Read UART data
-  if (mySerial.available()) {
-    uartLevel = mySerial.parseInt();
+  //if (mySerial.available()) {
+    //uartLevel = mySerial.parseInt();
 
-    Serial.print("UART level: ");
-    Serial.println(uartLevel);
+    //Serial.print("UART level: ");
+    //Serial.println(uartLevel);
+  //}
+  if (mySerial.available() > 0) {
+  uint8_t receivedByte = mySerial.read();
+
+  if (receivedByte >= 0 && receivedByte <= 10) {
+    uartLevel = receivedByte;
   }
+}
 
   // Update button states
   updateButton(
